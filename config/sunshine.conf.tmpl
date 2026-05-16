@@ -1,0 +1,38 @@
+# Sunshine/Lumen host config — template.
+# scripts/05-configure.sh menyalin file ini ke ~/.config/sunshine/sunshine.conf
+# (placeholder __MODE__ akan diganti otomatis).
+#
+# CATATAN JUJUR: nama kunci config bisa sedikit berbeda antar versi
+# Sunshine/Lumen. Nilai di bawah adalah default yang efisien & aman; bila
+# sebuah kunci tidak dikenali oleh versi Lumen kamu, host akan
+# mengabaikannya — sesuaikan lewat web UI https://localhost:47990 bila perlu.
+
+sunshine_name = MacMonitor
+
+# --- Encoder: paksa hardware Apple Silicon ---
+# Lumen memakai VideoToolbox (HEVC/H.264) hardware di Apple Silicon.
+encoder = videotoolbox
+
+# --- Codec: utamakan HEVC (lebih efisien per-bitrate dari H.264) ---
+# Moonlight di iPhone modern mendukung HEVC hardware decode.
+# (Jika layar bermasalah, ganti ke H.264 dari web UI.)
+hevc_mode = 2
+
+# --- Mode tampilan ---
+# __MODE__ = "monitor" -> stream layar fisik Mac yang sedang dipakai
+#            (memantau aktivitas nyata).
+# __MODE__ = "virtual" -> Lumen membuat virtual display seukuran iPhone
+#            (sesi terpisah, tidak mengganggu layar Mac).
+# Mode aktif: __MODE__
+virtual_display = __VIRTUAL_DISPLAY__
+
+# --- Latensi / efisiensi ---
+# Bitrate & FPS sebenarnya diminta oleh klien Moonlight (atur di iPhone:
+# Settings -> Resolution/FPS/Bitrate). Server mengikuti secara adaptif.
+min_log_level = info
+
+# Kurangi delay buffering jaringan.
+fec_percentage = 10
+
+# Port dasar (default Sunshine 47989/47990; ubah hanya bila bentrok).
+# port = 47989
