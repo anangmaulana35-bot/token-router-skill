@@ -21,6 +21,10 @@ case "$MODE" in
   *) die "Mode tidak valid: '$MODE'. Pilih: monitor | virtual." ;;
 esac
 info "Mode tampilan: $MODE"
+case "$MODE" in
+  monitor) VIRTUAL_DISPLAY="disabled" ;;
+  virtual) VIRTUAL_DISPLAY="enabled" ;;
+esac
 
 CFG_DIR="$HOME/.config/sunshine"
 mkdir -p "$CFG_DIR"
@@ -30,8 +34,11 @@ REPO_ROOT="$(cd .. && pwd)"
 cp "$REPO_ROOT/config/apps.json" "$CFG_DIR/apps.json"
 ok "apps.json -> $CFG_DIR/apps.json"
 
-# sunshine.conf dari template, ganti placeholder __MODE__.
-sed "s/__MODE__/$MODE/g" "$REPO_ROOT/config/sunshine.conf.tmpl" > "$CFG_DIR/sunshine.conf"
+# sunshine.conf dari template, ganti placeholder mode tampilan.
+sed \
+  -e "s/__MODE__/$MODE/g" \
+  -e "s/__VIRTUAL_DISPLAY__/$VIRTUAL_DISPLAY/g" \
+  "$REPO_ROOT/config/sunshine.conf.tmpl" > "$CFG_DIR/sunshine.conf"
 ok "sunshine.conf -> $CFG_DIR/sunshine.conf (mode=$MODE)"
 
 cat <<EOF
