@@ -5,6 +5,12 @@ Hemat biaya hingga **60–92%** tanpa kehilangan kualitas signifikan.
 
 ---
 
+> **Skill lain di repo ini:** Remote monitor + control MacBook → iPhone
+> (gratis, lebih efisien dari TeamViewer). Lihat **[SKILL.md](SKILL.md)** dan
+> **[docs/SETUP.md](docs/SETUP.md)**.
+
+---
+
 ## Pilihan Router
 
 | Router | Repo | Keunggulan |
