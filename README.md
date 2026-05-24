@@ -5,6 +5,53 @@ Hemat biaya hingga **60–92%** tanpa kehilangan kualitas signifikan.
 
 ---
 
+## LeanCtx — Hemat Token via Context Compaction
+
+LeanCtx mengompres history percakapan agar tidak melebihi budget token, tanpa kehilangan N pesan terakhir yang penting.
+
+### Instalasi
+
+```bash
+git clone <repo-ini>
+cd token-router-skill
+pip install -r requirements.txt
+```
+
+### Cara Pakai
+
+```python
+from lean_ctx import LeanCtx
+
+ctx = LeanCtx(
+    token_budget=8192,   # batas token total
+    keep_last_n=6,       # N pesan terakhir selalu utuh
+    system_prompt="Kamu asisten AI yang membantu coding.",
+)
+
+ctx.add("user", "pertanyaan panjang...")
+ctx.add("assistant", "jawaban panjang...")
+
+messages = ctx.get_messages()  # sudah dikompres, siap kirim ke API
+print(ctx.token_usage())       # {"used": 234, "budget": 8192, "saved": 120, ...}
+```
+
+### Parameter
+
+| Parameter | Default | Keterangan |
+|-----------|---------|------------|
+| `token_budget` | `8192` | Batas token context |
+| `keep_last_n` | `6` | Pesan terakhir yang tidak diringkas |
+| `system_prompt` | `None` | Dihitung ke total budget |
+
+### Strategi Kompres
+
+1. Pertahankan `keep_last_n` pesan terakhir utuh
+2. Pesan lebih lama: strip whitespace berlebih dulu
+3. Jika masih melebihi budget: ringkas dengan prefix `[ringkas]`
+4. Pesan paling lama dibuang jika budget habis
+
+---
+
 ## Pilihan Router
 
 | Router | Repo | Keunggulan |
