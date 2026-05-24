@@ -15,7 +15,7 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict]]:
     history.append({"role": "user", "content": user_message})
 
     response = client.messages.create(
-        model="claude-opus-4-7",
+        model="claude-haiku-4-5-20251001",
         max_tokens=4096,
         system=load_system_prompt(),
         messages=history,
