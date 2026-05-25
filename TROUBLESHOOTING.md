@@ -4,11 +4,13 @@ Catatan diagnosa dari log/screenshot Nova Hermes saat:
 - Voice note **tidak ter-transkrip** lagi (sebelumnya bisa).
 - Proses internal Nova (tool call streaming) **tidak terlihat** di Telegram lagi.
 
-Ringkasan: bukan model-nya yang berubah, ada **4 hal terpisah** yang kebetulan datang bareng — dan yang **paling baru** (errornya bukan di Nova tapi di **Codex** downstream) ada di langkah #4 di bawah.
+Ringkasan: bukan model-nya yang berubah, ada **4 hal terpisah** yang datang bareng. Yang paling urgent (LLM provider Nova hang) ada di langkah #0 di bawah; ada juga **stale code** referencing bot Codex yang sudah dihapus — langkah #0b.
+
+> **Koreksi diagnosa sebelumnya:** Awalnya aku kira `waiting for stream response` itu Nova delegasi ke `@NovaCodex35Bot`. Tapi bot Codex itu **sudah deprecated** dan nggak dipake lagi. Yang muncul di `/help` cuma teks stale. Jadi yang hang sebenarnya adalah **LLM provider utama Nova** (Claude/OpenAI langsung), bukan bot Codex.
 
 ---
 
-## 0. Error terbaru — Codex stream timeout, BUKAN Nova (PRIORITAS)
+## 0. Stream timeout di LLM provider utama Nova (PRIORITAS)
 
 ### Gejala
 ```
@@ -18,83 +20,119 @@ Ringkasan: bukan model-nya yang berubah, ada **4 hal terpisah** yang kebetulan d
    Task sedang dicoba ulang otomatis (1/1) agar lanjut, bukan gagal total.
 ```
 
-Penting: pesan `Nova agent timeout` **menyesatkan**. Nova sendiri jalan normal — yang hang adalah agent yang Nova delegasikan (Codex via `@NovaCodex35Bot` route). Nova nunggu stream chunks dari Codex, **0 chunk dalam 332 detik** → Nova trigger timeout.
+Nova kirim request streaming ke LLM provider (Claude / OpenAI / dst), **0 chunk balik dalam 332 detik** → Nova trigger timeout. Karena bot Codex sudah dihapus dari arsitektur, ini bukan masalah inter-bot — ini Nova ↔ LLM provider langsung.
 
-### Cara membedakan: Nova vs Codex yang error
-| Indikator | Penyebab |
-|---|---|
-| `getUpdates conflict` di log Nova | Nova-side (polling double) — lihat langkah #1 |
-| `provider=mock` di log ASR | Nova-side (config) — lihat langkah #2 |
-| `waiting for stream response (Ns, no chunks yet)` dengan `N` membesar | **Codex-side** — lihat di bawah |
-| `iteration 1/90` stuck | Codex-side, gagal sebelum first chunk |
-| `iteration 3/90` stuck (seperti sekarang) | Codex-side, gagal di tengah tool-loop |
+### Cara membedakan dari error Nova-side lain
+| Indikator | Penyebab | Langkah fix |
+|---|---|---|
+| `getUpdates conflict` di log Nova | Polling double instance | #1 |
+| `provider=mock` di log ASR | ASR config | #2 |
+| Tool call streaming hilang di Telegram | UI verbosity flag | #3 |
+| `waiting for stream response (Ns, no chunks yet)` dengan `N` membesar | **LLM provider hang** | **#0 ini** |
+| `iteration 1/90` stuck | Gagal sebelum first chunk (kemungkinan API key / model) |  |
+| `iteration 3/90` stuck (kasus sekarang) | Gagal di tengah tool-loop (context overflow / tool schema) |  |
 
-### Root cause umum di Codex (downstream agent)
+### Root cause umum
 
-1. **API key Codex expired / quota habis** — provider terima request, drop stream tanpa error chunk. Gejala: `no chunks yet` makin lama.
-2. **Model ID salah / di-deprecate** — provider hang 30–300s sebelum return error, kelihatan seperti stream stuck.
-3. **Context window overflow** — prompt+history Codex >> limit model, provider stuck di tokenize/queue.
-4. **Tool definition rusak** — JSON schema tool yang Nova kirim ke Codex invalid, provider stuck retry internal.
+1. **API key expired / quota habis** — provider terima request, drop stream tanpa error chunk.
+2. **Model ID di-deprecate** — provider hang 30–300s sebelum return error.
+3. **Context window overflow** — prompt+history >> limit model, provider stuck di queue. Cocok dengan kasus `iteration 3/90` (sudah 2 iterasi tool call, context membengkak).
+4. **Tool definition rusak** — JSON schema tool invalid, provider stuck retry internal.
 5. **Provider rate limit / outage** — request diterima tapi nggak diproses, no error chunk.
 6. **Network egress macet** — host Mac kena throttle / proxy putus, TCP open tapi nggak ada data.
 
-### Diagnosa Codex side
+### Diagnosa
 
 #### Cek API key & model yang aktif
 ```bash
-# Cari config Codex (lokasinya tergantung implementasi Nova)
-grep -RIn "codex\|CODEX\|gpt-4\|o1\|claude" ~/.hermes ~/.codex ~/.config 2>/dev/null | grep -i "key\|model\|api\|provider" | head -30
+# Cari config LLM Nova
+grep -RIn "api_key\|model\|provider" ~/.hermes ~/.nova ~/.config 2>/dev/null | head -30
 
-# Cek env var
-env | grep -iE "codex|openai|anthropic|api_key" | sed 's/=.*/=<REDACTED>/'
+# Cek env var (sembunyikan value)
+env | grep -iE "openai|anthropic|api_key|model" | sed 's/=.*/=<REDACTED>/'
 ```
 
-#### Test Codex endpoint langsung (bypass Nova)
+#### Test endpoint LLM langsung (bypass Nova)
 ```bash
-# Kalau Codex pakai OpenAI-compatible API:
+# Claude:
+curl -sS -m 30 https://api.anthropic.com/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"<model-nova>","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"ping"}]}'
+
+# OpenAI:
 curl -sS -m 30 https://api.openai.com/v1/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"<model-yang-dipakai-codex>","messages":[{"role":"user","content":"ping"}],"max_tokens":5,"stream":true}'
+  -d '{"model":"<model-nova>","messages":[{"role":"user","content":"ping"}],"max_tokens":5,"stream":true}'
 ```
-Kalau curl ini juga hang / `no chunks` → masalah di provider/API key, **bukan** di kode Nova.
-Kalau curl jalan normal → masalah di cara Nova bikin request ke Codex (bisa context overflow, tool schema rusak, atau wrapper bug).
+- Curl hang / no chunks → masalah **provider/API key/network**, bukan kode Nova.
+- Curl jalan normal → masalah di cara Nova bikin request (context overflow / tool schema / wrapper bug).
 
-#### Tail log Codex side (bukan Nova)
+#### Tail log LLM call di Nova
 ```bash
-# Lokasi log Codex biasanya terpisah dari Nova
-ls -la ~/.codex/logs/ ~/.hermes/logs/codex* /tmp/codex* 2>/dev/null
-tail -n 200 ~/.codex/logs/*.log 2>/dev/null | grep -iE "error|timeout|stream|abort"
+tail -n 500 ~/.nova/logs/*.log ~/.hermes/logs/*.log 2>/dev/null \
+  | grep -iE "stream|chunk|timeout|context|rate|error" | tail -50
 ```
-
-Cari pattern:
-- `stream aborted` / `connection reset` → network atau provider drop
-- `context_length_exceeded` → prompt kepanjangan
+Pattern penting:
+- `stream aborted` / `connection reset` → network/provider drop
+- `context_length_exceeded` → prompt kepanjangan → aktifkan compaction
 - `invalid_request_error` → tool schema atau model name salah
 - `rate_limit_exceeded` → quota habis
-- diam total (log kosong padahal Nova kirim request) → API key invalid, request ditolak silent
-
-### Fix per root cause
-
-| Root cause | Fix cepat |
-|---|---|
-| API key expired | Generate API key baru di dashboard provider, update env var, restart Nova |
-| Quota habis | Top-up / pindah ke key project lain |
-| Model deprecated | Ganti ke model aktif (kalau OpenAI deprecate `gpt-4-0314`, ganti ke `gpt-4o` / `gpt-4-turbo`) |
-| Context overflow | Aktifkan compaction di Nova (`/lean-ctx`, atau set `max_context_tokens` lebih konservatif) |
-| Tool schema rusak | Disable tools yang baru ditambah, isolate yang trigger error |
-| Network egress | Test `curl -v` ke endpoint, cek VPN/proxy |
+- log kosong walau Nova kirim request → API key ditolak silent
 
 ### Quick mitigation kalau urgent
-Turunkan timeout iterasi & jumlah retry biar nggak nunggu 12 menit:
+Turunkan timeout & retry biar nggak nunggu 12 menit:
 ```yaml
-# config Nova
 agent:
   stream_timeout_s: 30        # dari default 150s
   max_iterations: 30          # dari 90
-  abort_on_no_chunks_s: 45    # auto-abort lebih cepat, biar bisa retry
+  abort_on_no_chunks_s: 45
 ```
-Sibling branch `claude/nova-error-logs-H7IGB` punya `nova_fix.sh` yang sudah mencakup patch ini — bisa di-cherry-pick.
+Sibling branch `claude/nova-error-logs-H7IGB` punya `nova_fix.sh` yang sudah mencakup patch ini — bisa cherry-pick.
+
+---
+
+## 0b. Bersihkan stale reference `@NovaCodex35Bot` (cleanup)
+
+### Gejala
+```
+User: /help
+Nova: Nova Codex official route: @NovaCodex35Bot
+      Kirim pesan biasa untuk Full Agent lokal...
+```
+
+Bot `@NovaCodex35Bot` **sudah deprecated** — arsitektur baru Nova tidak pakai delegasi inter-bot ke Codex. Tapi handler `/help` masih punya string hardcoded yang nyebutnya. Ini bikin confusing (termasuk ke aku tadi waktu diagnosa awal).
+
+### Lokasi yang harus dicek di repo Nova (lokal di Mac)
+```bash
+cd <path-ke-repo-nova>
+
+# Cari semua referensi
+grep -RIn "NovaCodex35Bot\|Nova Codex official route\|@NovaCodex" \
+  --include="*.py" --include="*.ts" --include="*.js" \
+  --include="*.yaml" --include="*.yml" --include="*.json" \
+  --include="*.md" --include="*.txt" .
+```
+
+Kandidat file yang biasanya nampung teks ini:
+- `handlers/help.py` / `commands/help.*` — handler command `/help`
+- `templates/help.txt` / `messages/*.yaml` — template message bahasa Indonesia
+- `config/routing.yaml` / `bot_routes.json` — kalau ada route mapping
+- `README.md` / `docs/` — dokumentasi yang bocor ke runtime
+
+### Fix
+Hapus blok yang nyebut Nova Codex / `@NovaCodex35Bot`. Kalau routing logic-nya masih nyangkut (mis. ada fungsi `route_to_codex_bot()`), hapus juga — fungsi dead code yang nggak pernah dipanggil tapi mention di help.
+
+Setelah hapus, test:
+```
+User: /help
+Nova: <output baru, tanpa mention NovaCodex>
+```
+
+### Kenapa ini bikin diagnosa salah arah
+Waktu user lihat error `waiting for stream response`, lalu `/help` munculin "Nova Codex official route" — wajar disimpulkan bahwa Nova nunggu delegasi ke Codex bot. Padahal teks `/help` itu zombie. Hapus → diagnosa di masa depan nggak akan kemana-mana lagi.
 
 ---
 
