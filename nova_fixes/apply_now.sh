@@ -132,7 +132,62 @@ else
     echo "  grep -rn 'range(90)\|timeout.*150\|MAX_ITER' $NOVA_DIR"
 fi
 
-# ── 6. FIX ASR PROVIDER ───────────────────────────────────────────────────
+# ── 6. FIX SYSTEM PROMPT (ROOT CAUSE TERBARU) ────────────────────────────
+echo ""
+warn "STEP 6: Cari dan kompres system prompt yang terlalu besar..."
+
+# Cari file yang punya system prompt panjang (SYSTEM_PROMPT = atau system= )
+SYS_FILES=$(grep -rl "SYSTEM_PROMPT\|system_prompt\|\"system\":" "$NOVA_DIR" --include="*.py" 2>/dev/null | grep -v __pycache__ | grep -v nova_fixes || true)
+
+SYS_PATCH='
+# --- system_guard patch (auto) ---
+try:
+    from nova_fixes.system_guard import SystemGuard as _SysGuard
+    import os as _os
+    _sys_guard = _SysGuard(model=_os.getenv("LLM_MODEL", "claude-haiku-4-5"))
+    if "SYSTEM_PROMPT" in dir() or "SYSTEM_PROMPT" in globals():
+        SYSTEM_PROMPT = _sys_guard.compress(SYSTEM_PROMPT)
+    if "system_prompt" in dir() or "system_prompt" in globals():
+        system_prompt = _sys_guard.compress(system_prompt)
+except Exception as _e:
+    print(f"[system_guard] skip: {_e}")
+# --- end system_guard patch ---
+'
+
+if [ -n "$SYS_FILES" ]; then
+    echo "$SYS_FILES" | while read f; do
+        if ! grep -q "system_guard patch" "$f"; then
+            cp "$f" "${f}.bak_$(date +%Y%m%d_%H%M%S)"
+            python3 - "$f" "$SYS_PATCH" <<'PYEOF'
+import sys
+fpath = sys.argv[1]
+patch = sys.argv[2]
+with open(fpath) as ff:
+    lines = ff.readlines()
+# Inject setelah definisi SYSTEM_PROMPT
+insert_at = len(lines) - 1
+for i, l in enumerate(lines):
+    if "SYSTEM_PROMPT" in l or "system_prompt" in l:
+        insert_at = i + 1
+        break
+lines.insert(insert_at, '\n' + patch + '\n')
+with open(fpath, "w") as ff:
+    ff.writelines(lines)
+print("Patched:", fpath)
+PYEOF
+            ok "  SystemGuard di-inject ke: $f"
+        else
+            warn "  Sudah ada di: $f — skip."
+        fi
+    done
+else
+    warn "  File system prompt tidak ditemukan via grep."
+    echo "  Tambahkan manual setelah definisi SYSTEM_PROMPT di kode Nova:"
+    echo "  from nova_fixes.system_guard import SystemGuard"
+    echo "  SYSTEM_PROMPT = SystemGuard(model='claude-haiku-4-5').compress(SYSTEM_PROMPT)"
+fi
+
+# ── 7. FIX ASR PROVIDER ───────────────────────────────────────────────────
 echo ""
 warn "STEP 6: Fix ASR provider (mock → whisper)..."
 
@@ -183,10 +238,11 @@ echo "  SELESAI"
 echo "======================================"
 echo ""
 echo "Yang sudah diperbaiki:"
-echo "  [1] Context overflow → CtxGuard di-inject (potong history lama)"
-echo "  [2] Stream timeout   → 150s/90iter → 30s/3iter"
-echo "  [3] ASR provider     → mock → whisper"
-echo "  [4] Instance ganda   → semua dihentikan, 1 di-restart"
+echo "  [1] SYSTEM PROMPT    → SystemGuard kompres (root cause error terbaru)"
+echo "  [2] Context overflow → CtxGuard potong history percakapan"
+echo "  [3] Stream timeout   → 150s/90iter → 30s/3iter"
+echo "  [4] ASR provider     → mock → whisper"
+echo "  [5] Instance ganda   → semua dihentikan, 1 di-restart"
 echo ""
 echo "CARA PAKAI MANUAL (kalau inject gagal):"
 echo "  Di file conversation handler kamu, tambahkan:"
