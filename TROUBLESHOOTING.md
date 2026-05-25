@@ -4,9 +4,13 @@ Catatan diagnosa dari log/screenshot Nova Hermes saat:
 - Voice note **tidak ter-transkrip** lagi (sebelumnya bisa).
 - Proses internal Nova (tool call streaming) **tidak terlihat** di Telegram lagi.
 
-Ringkasan: bukan model-nya yang berubah, ada **4 hal terpisah** yang datang bareng. Yang paling urgent (LLM provider Nova hang) ada di langkah #0 di bawah; ada juga **stale code** referencing bot Codex yang sudah dihapus — langkah #0b.
+Ringkasan: ini **satu bot saja** — `@Nova_hermes35bot` (Nova Hermes) — bukan dua bot terpisah. Tapi identitas internal & teks-teks hardcoded-nya rusak: display name muncul sebagai "Nova", `/help` ngaku "Nova Codex" route ke `@NovaCodex35Bot` (bot yang sudah deprecated). Plus ada 4 masalah runtime yang datang bareng. Yang paling urgent ada di #0 (LLM stream timeout) dan #0b (identitas bot rusak).
 
-> **Koreksi diagnosa sebelumnya:** Awalnya aku kira `waiting for stream response` itu Nova delegasi ke `@NovaCodex35Bot`. Tapi bot Codex itu **sudah deprecated** dan nggak dipake lagi. Yang muncul di `/help` cuma teks stale. Jadi yang hang sebenarnya adalah **LLM provider utama Nova** (Claude/OpenAI langsung), bukan bot Codex.
+> **Koreksi diagnosa sebelumnya (dua kali salah arah):**
+> 1. Awalnya aku kira ada delegasi inter-bot Nova → Codex. **Salah** — Codex bot udah deprecated, nggak ada delegasi.
+> 2. Lalu aku kira ada dua bot terpisah (Nova Hermes vs Nova). **Juga salah** — cuma satu bot `@Nova_hermes35bot`, tapi identitas-nya broken karena display name & help text masih nyebut nama lama.
+>
+> Jadi stream timeout `waiting for stream response (332s, no chunks)` itu di **Nova Hermes ↔ LLM provider** (Claude/OpenAI langsung). Codex tidak ada di pipeline. Yang perlu dibetulkan: (a) LLM call hang, dan (b) identitas/teks bot yang masih bilang dia "Nova Codex".
 
 ---
 
@@ -94,45 +98,59 @@ Sibling branch `claude/nova-error-logs-H7IGB` punya `nova_fix.sh` yang sudah men
 
 ---
 
-## 0b. Bersihkan stale reference `@NovaCodex35Bot` (cleanup)
+## 0b. Identitas Nova Hermes rusak — display name & /help masih ngaku "Nova Codex"
 
 ### Gejala
-```
-User: /help
-Nova: Nova Codex official route: @NovaCodex35Bot
-      Kirim pesan biasa untuk Full Agent lokal...
-```
+Bot dengan username `@Nova_hermes35bot` (yang seharusnya **Nova Hermes**) menampilkan:
 
-Bot `@NovaCodex35Bot` **sudah deprecated** — arsitektur baru Nova tidak pakai delegasi inter-bot ke Codex. Tapi handler `/help` masih punya string hardcoded yang nyebutnya. Ini bikin confusing (termasuk ke aku tadi waktu diagnosa awal).
+- **Header chat:** "Nova" (bukan "Nova Hermes")
+- **`/help` output:**
+  ```
+  Nova Codex official route: @NovaCodex35Bot
+  Kirim pesan biasa untuk Full Agent lokal.
+  Nova diperlakukan sebagai assistant engineering utama...
+  ```
+- Padahal `@NovaCodex35Bot` sudah **deprecated** dan bukan bagian dari arsitektur lagi.
 
-### Lokasi yang harus dicek di repo Nova (lokal di Mac)
+Ini bikin confusing: user mengira sedang chat dengan bot lain (Nova Codex), padahal sama saja Nova Hermes — cuma identitas hardcoded-nya belum di-update.
+
+### Lokasi yang harus dicek di repo Nova Hermes (di Mac)
 ```bash
-cd <path-ke-repo-nova>
+cd <path-ke-repo-nova-hermes>
 
-# Cari semua referensi
-grep -RIn "NovaCodex35Bot\|Nova Codex official route\|@NovaCodex" \
+# Cari semua string identitas
+grep -RIn "NovaCodex35Bot\|Nova Codex\|@NovaCodex\|Codex official route" \
   --include="*.py" --include="*.ts" --include="*.js" \
   --include="*.yaml" --include="*.yml" --include="*.json" \
-  --include="*.md" --include="*.txt" .
+  --include="*.toml" --include="*.md" --include="*.txt" .
+
+# Cari display name / bot description yang mungkin masih "Nova" doang
+grep -RIn "\"Nova\"\|name.*Nova\|display_name\|bot_name" \
+  --include="*.py" --include="*.yaml" --include="*.json" .
 ```
 
-Kandidat file yang biasanya nampung teks ini:
+Kandidat file:
 - `handlers/help.py` / `commands/help.*` — handler command `/help`
-- `templates/help.txt` / `messages/*.yaml` — template message bahasa Indonesia
-- `config/routing.yaml` / `bot_routes.json` — kalau ada route mapping
-- `README.md` / `docs/` — dokumentasi yang bocor ke runtime
+- `templates/help.{txt,md,yaml}` / `messages/id/*.yaml` — template Bahasa Indonesia
+- `config/bot.yaml` / `config/identity.yaml` — display name & branding
+- `prompts/system_prompt.*` — kalau bot self-identify lewat LLM, system prompt mungkin masih nyebut "Nova Codex"
+- `setMyName` / `setMyDescription` BotFather calls — kalau identitas di-set programatik via Telegram API
 
-### Fix
-Hapus blok yang nyebut Nova Codex / `@NovaCodex35Bot`. Kalau routing logic-nya masih nyangkut (mis. ada fungsi `route_to_codex_bot()`), hapus juga — fungsi dead code yang nggak pernah dipanggil tapi mention di help.
+### Fix yang perlu dilakukan
+1. **Ganti display name di BotFather** → "Nova Hermes" (atau via API: `setMyName`).
+2. **Hapus blok `/help` yang nyebut Nova Codex / @NovaCodex35Bot**. Ganti dengan deskripsi Nova Hermes yang benar.
+3. **Cek system prompt LLM** — kalau ada `"You are Nova Codex..."` ganti ke `"You are Nova Hermes..."`.
+4. **Hapus dead-code routing** — kalau ada fungsi `route_to_codex_bot()` / `forward_to_nova_codex()` yang nggak pernah dipanggil, hapus juga.
 
-Setelah hapus, test:
+### Test setelah fix
 ```
 User: /help
-Nova: <output baru, tanpa mention NovaCodex>
+Nova Hermes: <output baru — identitas Nova Hermes, tanpa mention NovaCodex>
 ```
+Header chat juga harus berubah jadi "Nova Hermes" (mungkin perlu clear cache Telegram client).
 
-### Kenapa ini bikin diagnosa salah arah
-Waktu user lihat error `waiting for stream response`, lalu `/help` munculin "Nova Codex official route" — wajar disimpulkan bahwa Nova nunggu delegasi ke Codex bot. Padahal teks `/help` itu zombie. Hapus → diagnosa di masa depan nggak akan kemana-mana lagi.
+### Kenapa ini bikin diagnosa salah arah (catatan)
+Stale string "Nova Codex official route" bikin orang (termasuk aku) ngira ada bot Codex aktif di pipeline. Padahal itu cuma label zombie. Sekali identitas dibetulin, debugging future jadi nggak akan kemana-mana lagi.
 
 ---
 
