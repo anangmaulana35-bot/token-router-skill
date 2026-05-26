@@ -131,6 +131,35 @@ echo "=== Log errors ===" && grep -iE "error|fail" ~/.cache/sunshine/sunshine.lo
 
 ---
 
+---
+
+## Kontrol Touch / Mouse di iPad Tidak Bisa Digerakkan
+
+### Ubah Touch Mode (saat sedang streaming)
+
+1. **Swipe dari tepi kiri** layar ke kanan → muncul overlay menu
+2. Ketuk ikon **Settings (gear)**
+3. **Touch Mode** → ganti ke **"Trackpad"**
+
+| Mode | Cara Kerja |
+|------|-----------|
+| Touchscreen | Tap langsung di posisi cursor (susah presisi) |
+| **Trackpad** ✅ | Geser jari = gerak cursor, tap = klik kiri, 2 jari tap = klik kanan |
+| Mouse | Perlu mouse fisik terhubung ke iPad |
+
+### Ubah Touch Mode (sebelum connect)
+
+Di halaman utama Moonlight → **Settings** → **Basic Settings** → **On-screen Controls / Touch Mode** → pilih **Trackpad**.
+
+### Tips tambahan
+
+- **Scroll**: 2 jari geser atas/bawah
+- **Klik kanan**: tap 2 jari sekaligus
+- **Drag**: tap tahan lalu geser
+- **Keyboard**: ketuk ikon keyboard di overlay untuk onscreen keyboard
+
+---
+
 ## Referensi
 
 - Setup awal: [`docs/SETUP.md`](docs/SETUP.md) (dari PR #2)
