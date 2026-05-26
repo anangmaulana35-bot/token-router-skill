@@ -1,95 +1,78 @@
-# Nova — Catatan Perbaikan Diri (Self-Improve Log)
+# Nova — Log Diagnosis & Perbaikan Diri
 
-Dokumen ini berisi instruksi dan catatan untuk Nova agar bisa mendiagnosis
-dan memperbaiki dirinya sendiri tanpa perlu intervensi manual.
+> **PENTING:** File ini adalah memori permanen Claude dan Nova.
+> Baca file ini di awal setiap sesi baru. Lihat `SOP_RULES.md` untuk aturan lengkap.
 
 ---
 
-## [2026-05-26] Error: Context Window Exceeded
+## Cara Membaca Log Ini
+
+- Entry terbaru ada di **paling atas**.
+- Setiap entry mengikuti format standar dari `SOP_RULES.md`.
+- Status `[x]` = sudah selesai, `[ ]` = masih perlu tindak lanjut.
+
+---
+
+---
+
+## [2026-05-26] Error: Context Window Exceeded — Nova Tidak Bisa Memproses Pesan
 
 ### Gejala
 ```
 [Error] Your input exceeds the context window of this model.
 Please adjust your input and try again.
 ```
-Error ini muncul berulang kali saat Nova diajak bicara, bahkan untuk pesan pendek sekalipun.
+Error muncul berulang-ulang saat user Luna Malik mengirim pesan ke Nova.
+Bahkan pesan pendek seperti "Profil luna Pin 2222" dan "Profil luna 2222"
+tetap memicu error yang sama. Nova tidak bisa merespons sama sekali.
 
-### Penyebab (Diagnosis)
+Terlihat di screenshot bahwa Nova menampilkan error ini minimal 3 kali berturut-turut
+(pukul 22:56–22:58).
 
-1. **Riwayat percakapan terlalu panjang** — setiap request mengirim seluruh history chat ke model, sehingga token terus menumpuk.
-2. **Pinned Brief terlalu besar** — instruksi/brief yang di-pin (BRIEF_NOVA_UP...) ikut dikirim di setiap request dan memakan banyak token.
-3. **Model context window terlalu kecil** — model yang dipakai Nova mungkin hanya mendukung context pendek (misal 8K–16K token).
+### Penyebab
+1. **Riwayat percakapan menumpuk** — seluruh history chat dikirim ke model setiap request, total token terus bertambah hingga melampaui batas.
+2. **Pinned Brief terlalu besar** — ada "Pinned Message" berisi `BRIEF_NOVA_UP...` yang ikut dikirim di setiap request dan memakan banyak token.
+3. **Model context window tidak cukup** — model yang digunakan Nova kemungkinan memiliki context window kecil (8K–16K token).
 
-### Instruksi Perbaikan (Self-Fix Steps)
+### Tindakan Perbaikan
 
-#### Langkah 1 — Reset Context
-- Mulai sesi percakapan baru (clear/reset history).
-- Jangan bawa history lama ke sesi baru kecuali benar-benar diperlukan.
+**Jangka Pendek (Langsung):**
+- Reset/clear sesi percakapan Nova → mulai sesi baru tanpa history lama.
+- Persingkat Pinned Brief menjadi maksimal 500–800 token.
 
-#### Langkah 2 — Persingkat Brief / Instruksi
-- Audit panjang brief yang di-pin. Targetkan maksimal **500–800 token**.
-- Hapus bagian yang redundan atau jarang dipakai.
-- Pisahkan brief menjadi modul kecil, muat hanya yang relevan per sesi.
-
-#### Langkah 3 — Aktifkan Context Compression
-- Gunakan teknik **rolling summary**: setelah N pesan, rangkum history lama
-  menjadi 1–2 paragraf ringkasan, lalu ganti history dengan ringkasan itu.
-- Contoh trigger: jika total token history > 60% dari context window, auto-compress.
-
+**Jangka Menengah:**
+- Implementasi **rolling summary**: setelah history > 60% context window, kompres otomatis menjadi ringkasan.
+- Contoh kode:
 ```python
-# Contoh logika compression sederhana
 def compress_history(messages, threshold=0.6, max_tokens=8000):
     total = estimate_tokens(messages)
     if total > max_tokens * threshold:
-        summary = summarize(messages[:-4])   # ringkas semua kecuali 4 pesan terakhir
+        summary = summarize(messages[:-4])
         messages = [{"role": "system", "content": f"Ringkasan sebelumnya: {summary}"}] \
                    + messages[-4:]
     return messages
 ```
 
-#### Langkah 4 — Upgrade Model Context Window
-- Jika error masih terjadi setelah compression, pertimbangkan pindah ke model
-  dengan context window lebih besar:
+**Jangka Panjang:**
+- Upgrade ke model dengan context window besar (Claude Sonnet/Opus = 200K token).
+- Integrasikan token-router agar pesan ringan tidak membebani model kuat.
+- Tambahkan aturan pencegahan otomatis:
+  - >70% limit → auto-compress
+  - >90% limit → auto-reset + simpan ringkasan
 
-| Model               | Context Window |
-|---------------------|---------------|
-| claude-haiku-4-5    | 200K token    |
-| claude-sonnet-4-6   | 200K token    |
-| claude-opus-4-7     | 200K token    |
+### Status
+- [x] Diagnosa selesai
+- [x] Instruksi perbaikan dicatat
+- [ ] Implementasi compression di Nova — perlu dilakukan
+- [ ] Verifikasi brief sudah diperpendek — perlu dicek
+- [ ] Konfirmasi error tidak muncul lagi setelah perbaikan
 
-- Update `config.json` Nova:
-```json
-{
-  "model": "claude-sonnet-4-6",
-  "max_context_tokens": 180000,
-  "auto_compress_threshold": 0.7
-}
-```
-
-#### Langkah 5 — Integrasikan dengan Token Router
-- Gunakan skill `token-router` agar pesan sederhana tidak membebani model kuat.
-- Pesan ringan (salam, jawaban pendek) → weak model (Haiku).
-- Pesan kompleks (analisis, coding, multi-step) → strong model (Sonnet/Opus).
-- Ini otomatis mengurangi beban context pada model kuat.
+### Catatan untuk Sesi Berikutnya
+- Tanyakan ke user apakah brief Nova sudah diperpendek atau belum.
+- Jika Nova masih error context window, langsung cek panjang brief yang di-pin.
+- Model yang direkomendasikan: `claude-sonnet-4-6` (200K context).
+- Jangan biarkan history percakapan Nova tumbuh tanpa batas — pastikan ada mekanisme compression.
 
 ---
 
-## Aturan Pencegahan (Prevention Rules)
-
-Nova HARUS menjalankan cek berikut sebelum setiap request:
-
-```
-1. Hitung estimasi total token (history + brief + pesan baru).
-2. Jika > 70% dari max context → jalankan compression dulu.
-3. Jika > 90% dari max context → reset history, simpan ringkasan.
-4. Jika error context window terjadi → otomatis retry dengan history yang sudah dicompress.
-5. Jangan pernah mengirim raw history tanpa batas.
-```
-
----
-
-## Referensi
-
-- [Anthropic Context Window Docs](https://docs.anthropic.com/en/docs/about-claude/models)
-- [RouteLLM untuk token routing](https://github.com/lm-sys/RouteLLM)
-- Skill terkait: `token-router-skill` (repo ini)
+*Log ini dikelola bersama oleh Claude dan Nova. Update terakhir: 2026-05-26.*
