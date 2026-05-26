@@ -1,0 +1,11 @@
+{
+  "router": "mf",
+  "strong_model": "claude-opus-4-7",
+  "weak_model": "claude-haiku-4-5-20251001",
+  "threshold": 0.12,
+  "fallback": "weak",
+  "api": {
+    "default_model": "claude-haiku-4-5-20251001",
+    "require_model": true
+  }
+}

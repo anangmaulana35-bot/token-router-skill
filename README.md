@@ -103,12 +103,40 @@ result = router.route("tugas coding kompleks ini...")
 
 ---
 
+## Fix Error "Missing model" (CodexClientError 4)
+
+Error ini muncul saat request ke API tidak menyertakan field `model`.
+
+**Penyebab:**  
+`client.messages.create()` dipanggil tanpa parameter `model`.
+
+**Fix — selalu sertakan `model`:**
+
+```python
+response = client.messages.create(
+    model="claude-haiku-4-5-20251001",   # ← wajib ada
+    max_tokens=1024,
+    messages=messages,
+)
+```
+
+**Atau pakai `router.py` yang sudah include fix ini:**
+
+```python
+from router import chat
+
+reply = chat([{"role": "user", "content": "Halo"}])
+```
+
+---
+
 ## Self-Healing — Jika Routing Gagal
 
 1. Cek API key model strong/weak
 2. Turunkan threshold jika sering error di strong model
 3. Fallback ke weak model langsung jika router down
-4. Cari solusi: [RouteLLM Issues](https://github.com/lm-sys/RouteLLM/issues)
+4. Pastikan `model` selalu di-set — lihat bagian Fix di atas
+5. Cari solusi: [RouteLLM Issues](https://github.com/lm-sys/RouteLLM/issues)
 
 ---
 
